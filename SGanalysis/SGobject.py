@@ -417,3 +417,61 @@ class SGobject:
         ax.set_ylabel("Y")
 
         plt.show()
+
+    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0):
+        if not object_name:
+            object_name = self.gdf.geometry.name
+
+        if gene_names is not None:
+            if isinstance(gene_names, str):
+                gene_names = [gene_names] # Convert single gene name to list
+        
+        annotations = []
+        # Export polygons
+        for index, row in self.gdf.iterrows():
+            polygon = {
+                "tags": [object_name],
+                "shape": "polygon",
+                "channel": object_channel,
+                "location": {"Time": time, "XY": xy, "Z": z},
+                "coordinates": [{"x": coord[0], "y": coord[1]} for coord in list(row[object_name].exterior.coords)],
+                "id": str(row['object_id']),
+                "datasetId": datasetId
+            }
+            annotations.append(polygon)
+
+        # Export points
+        if gene_names:
+            filtered_points_gdf = self.points_gdf[self.points_gdf['name'].isin(gene_names)]
+        else:
+            filtered_points_gdf = self.points_gdf
+
+        if len(filtered_points_gdf) > 500000:
+            raise ValueError("There are more than 500,000 points. Please specify gene_names to filter.")
+        
+
+        point_id_start = len(self.gdf) + 1
+        for index, row in filtered_points_gdf.iterrows():
+            point = {
+                "tags": [row['name']],
+                "shape": "point",
+                "channel": point_channel,
+                "location": {"Time": time, "XY": xy, "Z": z},
+                "coordinates": [{"x": row['geometry'].x, "y": row['geometry'].y, "z": 0}],
+                "id": str(point_id_start + index),
+                "datasetId": datasetId
+            }
+            annotations.append(point)
+
+        # Assuming connections and properties are not part of this task
+        output_data = {
+            "annotations": annotations,
+            "annotationConnections": [],
+            "annotationProperties": [],
+            "annotationPropertyValues": {}
+        }
+
+        with open(output_file_path, 'w') as outfile:
+            json.dump(output_data, outfile, indent=2)
+
+        print(f"Exported to JSON: {output_file_path}")
