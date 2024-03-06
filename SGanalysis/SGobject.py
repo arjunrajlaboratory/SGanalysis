@@ -1,4 +1,5 @@
 import numpy as np
+import scanpy as sc
 import pandas as pd
 import geopandas as gpd
 from geopandas import GeoDataFrame
@@ -203,7 +204,15 @@ class SGobject:
         
         # Reset the index so the index_col becomes a regular column
         # pivot_table.reset_index(inplace=True)
-        self.cell_gene_table = pivot_table
+        self.cell_gene_table = sc.AnnData(pivot_table)
+
+    # Make a function to return the cell_gene_table as a DataFrame
+    def get_cell_gene_table_df(self):
+        """Returns the cell_gene_table as a DataFrame."""
+        if self.cell_gene_table is None:
+            print("Error: Cell Count DataFrame is not loaded.")
+            return
+        return self.cell_gene_table.to_df()
         
     def plot_gene_scatter(self, gene1, gene2):
         """Plots a scatter plot comparing occurrences of two genes across cells.
@@ -217,14 +226,17 @@ class SGobject:
             print("cell_gene_table is missing or empty. Please run the function to create it.")
             return
         
+        # Lot easier to work with a dataframe than an AnnData object
+        cell_gene_table_df = self.cell_gene_table.to_df()
+        
         # Check if both genes exist in the columns of cell_gene_table
-        if gene1 not in self.cell_gene_table.columns or gene2 not in self.cell_gene_table.columns:
+        if gene1 not in cell_gene_table_df.columns or gene2 not in cell_gene_table_df.columns:
             print(f"One or both genes ({gene1}, {gene2}) not found in cell_gene_table.")
             return
         
         # Extract occurrences for each gene
-        gene1_counts = self.cell_gene_table.get(gene1, 0)  # Default to 0 if gene not found
-        gene2_counts = self.cell_gene_table.get(gene2, 0)
+        gene1_counts = cell_gene_table_df.get(gene1, 0)  # Default to 0 if gene not found
+        gene2_counts = cell_gene_table_df.get(gene2, 0)
         
         # Plot scatter
         plt.figure(figsize=(8, 6))
@@ -248,27 +260,49 @@ class SGobject:
         if gene_name is None:
             print("Error: Please specify a gene name to plot.")
             return
-    
-        if gene_name in self.cell_gene_table.columns:
+        
+        # Lot easier to work with a dataframe than an AnnData object
+        cell_gene_table_df = self.cell_gene_table.to_df()
+
+        if gene_name in cell_gene_table_df.columns:
             # Plot histogram of expression levels for the specified gene
-            self.cell_gene_table[gene_name].plot(kind='hist', bins=100, title=f'Gene expression distribution for {gene_name}')
+            cell_gene_table_df[gene_name].plot(kind='hist', bins=100, title=f'Gene expression distribution for {gene_name}')
             plt.show()
 
             # Plot the gene expression levels on the polygons
-            merged_gdf = self.gdf.merge(self.cell_gene_table, on='object_id', how='left')
-            merged_gdf.plot(column=gene_name, cmap='Wistia', legend=True, figsize=(10, 10))
+            merged_gdf = self.gdf.merge(cell_gene_table_df, on='object_id', how='left')
+            fig, ax = plt.subplots(figsize=(10, 10))
+            merged_gdf.plot(column=gene_name, cmap='Wistia', legend=True, ax=ax)
+            ax.set_aspect('equal')
             plt.show()
 
 
             # Print the statistics for the specified gene, including max, min, mean, median
-            gene_stats = self.cell_gene_table[gene_name].describe()
+            gene_stats = cell_gene_table_df[gene_name].describe()
             print(f"Statistics for gene {gene_name}:", gene_stats)
 
             # Print the number of objects expressing the gene
-            num_expressing = (self.cell_gene_table[gene_name] > 0).sum()
-            print(f"Number of objects expressing {gene_name}: {num_expressing} out of {len(self.cell_gene_table)} ({num_expressing / len(self.cell_gene_table) * 100:.2f}%)")
+            num_expressing = (cell_gene_table_df[gene_name] > 0).sum()
+            print(f"Number of objects expressing {gene_name}: {num_expressing} out of {len(cell_gene_table_df)} ({num_expressing / len(cell_gene_table_df) * 100:.2f}%)")
         else:
             print(f"Error: Gene '{gene_name}' not found in the cell count matrix.")
+
+    def get_observation_list(self):
+        """Returns a list of the observation names in the cell_gene_table."""
+        if self.cell_gene_table is None:
+            print("Error: Cell Count DataFrame is not loaded.")
+            return
+        return self.cell_gene_table.obs.columns.tolist()
+    
+    def plot_observation_variable(self, observation_name):
+
+        obs_df = self.cell_gene_table.obs
+
+        joined_gdf = self.gdf.join(obs_df, on="object_id")
+        fig, ax = plt.subplots(figsize=(10, 10))
+        joined_gdf.plot(column=observation_name, legend=True, ax=ax)
+        ax.set_aspect('equal')
+        plt.show()
 
     def generate_statistics_and_histograms(self):
         # Check for the existence of required properties
@@ -281,9 +315,12 @@ class SGobject:
         if self.assigned_points_gdf.empty:
             print("Assigned Points GeoDataFrame (assigned_points_gdf) is missing. Please run appropriate loading function.")
             return
-        if self.cell_gene_table.empty:
+        if self.cell_gene_table is None:
             print("Cell Count DataFrame (cell_gene_table) is missing. Please run appropriate loading function.")
             return
+        
+        # Lot easier to work with a dataframe than an AnnData object
+        cell_gene_table_df = self.cell_gene_table.to_df()
 
         # Basic Statistics
         num_objects = len(self.gdf)
