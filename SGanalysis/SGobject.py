@@ -12,7 +12,7 @@ class SGobject:
     def __init__(self):
         self.gdf = None
         self.points_gdf = None
-        self.cell_count_df = None
+        self.cell_gene_table = None
         self.assigned_points_gdf = None
         self._point_assignment_mode = "Nearest"  # Use a private variable for the actual storage
 
@@ -127,7 +127,7 @@ class SGobject:
         # Optionally, drop the 'x' and 'y' columns if they are not needed
         # self.points_gdf.drop(columns=['x', 'y'], inplace=True)
 
-    def create_cell_count_df(self, index_col='object_id', point_assignment_mode=None):
+    def create_cell_gene_table(self, index_col='object_id', point_assignment_mode=None):
         """Creates a DataFrame counting occurrences of points within each cell and reports assignment percentage.
         Optionally sets the point_assignment_mode if provided.
         
@@ -203,7 +203,7 @@ class SGobject:
         
         # Reset the index so the index_col becomes a regular column
         # pivot_table.reset_index(inplace=True)
-        self.cell_count_df = pivot_table
+        self.cell_gene_table = pivot_table
         
     def plot_gene_scatter(self, gene1, gene2):
         """Plots a scatter plot comparing occurrences of two genes across cells.
@@ -212,19 +212,19 @@ class SGobject:
         - gene1: The name of the first gene to plot on the x-axis.
         - gene2: The name of the second gene to plot on the y-axis.
         """
-        # Check for the existence and non-emptiness of cell_count_df
-        if self.cell_count_df is None or self.cell_count_df.empty:
-            print("cell_count_df is missing or empty. Please run the function to create it.")
+        # Check for the existence and non-emptiness of cell_gene_table
+        if self.cell_gene_table is None or self.cell_gene_table.empty:
+            print("cell_gene_table is missing or empty. Please run the function to create it.")
             return
         
-        # Check if both genes exist in the columns of cell_count_df
-        if gene1 not in self.cell_count_df.columns or gene2 not in self.cell_count_df.columns:
-            print(f"One or both genes ({gene1}, {gene2}) not found in cell_count_df.")
+        # Check if both genes exist in the columns of cell_gene_table
+        if gene1 not in self.cell_gene_table.columns or gene2 not in self.cell_gene_table.columns:
+            print(f"One or both genes ({gene1}, {gene2}) not found in cell_gene_table.")
             return
         
         # Extract occurrences for each gene
-        gene1_counts = self.cell_count_df.get(gene1, 0)  # Default to 0 if gene not found
-        gene2_counts = self.cell_count_df.get(gene2, 0)
+        gene1_counts = self.cell_gene_table.get(gene1, 0)  # Default to 0 if gene not found
+        gene2_counts = self.cell_gene_table.get(gene2, 0)
         
         # Plot scatter
         plt.figure(figsize=(8, 6))
@@ -241,7 +241,7 @@ class SGobject:
         Parameters:
         - gene_name: The name of the gene to plot.
         """
-        if self.cell_count_df is None:
+        if self.cell_gene_table is None:
             print("Error: Cell Count DataFrame is not loaded.")
             return
         
@@ -249,24 +249,24 @@ class SGobject:
             print("Error: Please specify a gene name to plot.")
             return
     
-        if gene_name in self.cell_count_df.columns:
+        if gene_name in self.cell_gene_table.columns:
             # Plot histogram of expression levels for the specified gene
-            self.cell_count_df[gene_name].plot(kind='hist', bins=100, title=f'Gene expression distribution for {gene_name}')
+            self.cell_gene_table[gene_name].plot(kind='hist', bins=100, title=f'Gene expression distribution for {gene_name}')
             plt.show()
 
             # Plot the gene expression levels on the polygons
-            merged_gdf = self.gdf.merge(self.cell_count_df, on='object_id', how='left')
+            merged_gdf = self.gdf.merge(self.cell_gene_table, on='object_id', how='left')
             merged_gdf.plot(column=gene_name, cmap='Wistia', legend=True, figsize=(10, 10))
             plt.show()
 
 
             # Print the statistics for the specified gene, including max, min, mean, median
-            gene_stats = self.cell_count_df[gene_name].describe()
+            gene_stats = self.cell_gene_table[gene_name].describe()
             print(f"Statistics for gene {gene_name}:", gene_stats)
 
             # Print the number of objects expressing the gene
-            num_expressing = (self.cell_count_df[gene_name] > 0).sum()
-            print(f"Number of objects expressing {gene_name}: {num_expressing} out of {len(self.cell_count_df)} ({num_expressing / len(self.cell_count_df) * 100:.2f}%)")
+            num_expressing = (self.cell_gene_table[gene_name] > 0).sum()
+            print(f"Number of objects expressing {gene_name}: {num_expressing} out of {len(self.cell_gene_table)} ({num_expressing / len(self.cell_gene_table) * 100:.2f}%)")
         else:
             print(f"Error: Gene '{gene_name}' not found in the cell count matrix.")
 
@@ -281,8 +281,8 @@ class SGobject:
         if self.assigned_points_gdf.empty:
             print("Assigned Points GeoDataFrame (assigned_points_gdf) is missing. Please run appropriate loading function.")
             return
-        if self.cell_count_df.empty:
-            print("Cell Count DataFrame (cell_count_df) is missing. Please run appropriate loading function.")
+        if self.cell_gene_table.empty:
+            print("Cell Count DataFrame (cell_gene_table) is missing. Please run appropriate loading function.")
             return
 
         # Basic Statistics
