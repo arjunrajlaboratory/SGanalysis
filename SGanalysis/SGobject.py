@@ -359,7 +359,7 @@ class SGobject:
         ax.set_ylabel("Y")
         plt.show()
 
-    def plot_polygon_and_points(self, identifier, id_field='object_id'):
+    def plot_polygon_and_points(self, identifier, id_field='object_id', gene_names=None):
         if self.gdf is None or self.assigned_points_gdf is None:
             print("Error: Ensure both gdf and assigned_points_gdf are loaded.")
             return
@@ -379,6 +379,11 @@ class SGobject:
 
         other_polygons = self.gdf[self.gdf.geometry.intersects(expanded_bbox) & (self.gdf[id_field] != identifier)]
         points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf.geometry.within(expanded_bbox)]
+
+        if gene_names is not None:
+            if isinstance(gene_names, str):
+                gene_names = [gene_names]
+            points_within_bbox = points_within_bbox[points_within_bbox['name'].isin(gene_names)]
 
         fig, ax = plt.subplots()
         polygon_gdf.boundary.plot(ax=ax, color='red', linewidth=2)
