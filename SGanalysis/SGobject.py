@@ -50,7 +50,7 @@ class SGobject:
         for geom, value in mask_polygons:
             simplified_shape = shape(geom).simplify(tolerance, preserve_topology=True)
             features.append(simplified_shape)
-            object_id.append(value)
+            object_id.append(str(np.int32(value))) # Could probably avoid the cast to int32
         
         self.gdf = gpd.GeoDataFrame({'object_id': object_id, object_column_name: features}, geometry=object_column_name)
 
@@ -221,9 +221,9 @@ class SGobject:
         - gene1: The name of the first gene to plot on the x-axis.
         - gene2: The name of the second gene to plot on the y-axis.
         """
-        # Check for the existence and non-emptiness of cell_gene_table
-        if self.cell_gene_table is None or self.cell_gene_table.empty:
-            print("cell_gene_table is missing or empty. Please run the function to create it.")
+        # Check for the existence of cell_gene_table
+        if self.cell_gene_table is None:
+            print("cell_gene_table is missing. Please run the function to create it.")
             return
         
         # Lot easier to work with a dataframe than an AnnData object
