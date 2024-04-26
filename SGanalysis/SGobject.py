@@ -455,6 +455,67 @@ class SGobject:
 
         plt.show()
 
+    def l_metric(self, gene1, gene2, plot_hexbin=False, plot_gene_counts=False, plot_cumulative_sum=False):
+        cell_count_df = self.get_cell_gene_table_df()
+        gene1_counts = cell_count_df.get(gene1)
+        gene2_counts = cell_count_df.get(gene2)
+
+        if plot_hexbin:
+            mask = (gene1_counts > 0) | (gene2_counts > 0)
+            gene1_counts_nozeros = gene1_counts[mask]
+            gene2_counts_nozeros = gene2_counts[mask]
+            plt.figure(figsize=(8, 6))
+            plt.hexbin(gene1_counts_nozeros, gene2_counts_nozeros, gridsize=50, cmap='Reds', mincnt=1)
+            plt.colorbar(label='Number of Cells')
+            plt.title(f"Hexbin Plot of {gene1} vs. {gene2}")
+            plt.xlabel(gene1)
+            plt.ylabel(gene2)
+            plt.show()
+
+        df_genes = cell_count_df[[gene1, gene2]].copy()
+        df_genes[f"random_{gene2}"] = np.random.permutation(df_genes[gene2].values)
+        df_sorted = df_genes.sort_values(by=gene1, ascending=False)
+        df_sorted.reset_index(drop=True, inplace=True)
+
+        if plot_gene_counts:
+            plt.figure(figsize=(10, 6))
+            x_values = df_sorted.index
+            plt.scatter(x_values, df_sorted[f"random_{gene2}"], color='green', label="Random", s=10, alpha=0.5)
+            plt.scatter(x_values, df_sorted[gene1], color='blue', label=gene1, s=10, alpha=0.5)
+            plt.scatter(x_values, df_sorted[gene2], color='red', label=gene2, s=10, alpha=0.5)
+            plt.title('Gene Counts Comparison')
+            plt.xlabel('Index')
+            plt.ylabel('Counts')
+            plt.legend()
+            plt.show()
+
+        df_sorted['cumsum_' + gene1] = df_sorted[gene1].cumsum()
+        df_sorted['cumsum_' + gene2] = df_sorted[gene2].cumsum()
+        df_sorted['cumsum_random_' + gene2] = df_sorted[f"random_{gene2}"].cumsum()
+
+        if plot_cumulative_sum:
+            plt.figure(figsize=(10, 6))
+            plt.plot(df_sorted['cumsum_' + gene1], df_sorted['cumsum_' + gene2], color='red', label=f'{gene1} vs. {gene2}')
+            plt.plot(df_sorted['cumsum_' + gene1], df_sorted['cumsum_random_' + gene2], color='green', label=f'{gene1} vs. Random {gene2}')
+            plt.title(f'Cumulative Sum of {gene1} vs. {gene2}')
+            plt.xlabel(f'Cumulative Sum of {gene1}')
+            plt.ylabel(f'Cumulative Sum of {gene2}')
+            plt.grid(True)
+            plt.legend()
+            plt.show()
+
+        area_difference = 0
+        total_area = 0
+        for i in range(len(df_sorted) - 1):
+            deltaX = df_sorted['cumsum_' + gene1].iloc[i+1] - df_sorted['cumsum_' + gene1].iloc[i]
+            deltaY = ((df_sorted['cumsum_' + gene2].iloc[i+1] - df_sorted['cumsum_random_' + gene2].iloc[i+1]) + (df_sorted['cumsum_' + gene2].iloc[i] - df_sorted['cumsum_random_' + gene2].iloc[i])) / 2
+            area_difference += deltaX * deltaY
+            total_area += deltaX * (df_sorted['cumsum_' + gene2].iloc[i] + df_sorted['cumsum_' + gene2].iloc[i+1])/2
+
+        area_difference_normalized = area_difference / (df_sorted['cumsum_' + gene1].iloc[-1] * df_sorted['cumsum_' + gene2].iloc[-1])
+        total_area_normalized = total_area / (df_sorted['cumsum_' + gene1].iloc[-1] * df_sorted['cumsum_' + gene2].iloc[-1])
+        return area_difference_normalized, total_area_normalized
+
     def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0):
         if not object_name:
             object_name = self.gdf.geometry.name
