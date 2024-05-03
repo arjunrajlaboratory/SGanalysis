@@ -129,8 +129,9 @@ class SGobject:
         # self.points_gdf.drop(columns=['x', 'y'], inplace=True)
 
     def create_cell_gene_table(self, index_col='object_id', point_assignment_mode=None):
-        """Creates a DataFrame counting occurrences of points within each cell and reports assignment percentage.
-        Optionally sets the point_assignment_mode if provided.
+        """Creates an AnnData object counting occurrences of points within each cell and reports assignment percentage.
+        Optionally sets the point_assignment_mode if provided. Generally, it is better not to directly access the AnnData object.
+        Rather, you can use the get_cell_gene_table_df() function to get the cell_gene_table as a DataFrame.
         
         Parameters:
         - index_col: The column name to use as the index in the pivot table. Default is 'object_id'.
@@ -206,15 +207,87 @@ class SGobject:
         # pivot_table.reset_index(inplace=True)
         self.cell_gene_table = sc.AnnData(pivot_table)
 
+    def add_filter(self, filter_mask, filter_column="default_filter"):
+        """Adds a filter as a column to the obs DataFrame of the AnnData object.
+
+        Parameters:
+        - filter_mask: Boolean mask to apply as a filter.
+        - filter_column: Name of the column in obs where the filter will be stored (default is 'default_filter').
+        """
+        if self.cell_gene_table is None:
+            print("Error: AnnData object not initialized.")
+            return
+
+        # Ensure the filter mask has the correct length
+        if len(filter_mask) != self.cell_gene_table.n_obs:
+            print("Error: Filter mask length must match the number of observations in the AnnData object.")
+            return
+
+        # Add the filter mask to the obs DataFrame
+        self.cell_gene_table.obs[filter_column] = filter_mask
+        print(f"Filter added to obs DataFrame under column '{filter_column}'.")
+
+    def remove_filters(self, filter_name=None):
+        """Removes specified filters or all filters from the obs DataFrame of the AnnData object.
+
+        Parameters:
+        - filter_name: The name of the filter to remove. If None, all filters are removed (default is None).
+        """
+        if self.cell_gene_table is None:
+            print("Error: AnnData object not initialized.")
+            return
+
+        if filter_name is None:
+            # Remove all filters; assumes all Boolean columns in obs are filters.
+            # This can be customized to target specific columns if needed.
+            filter_columns = [col for col in self.cell_gene_table.obs.columns if self.cell_gene_table.obs[col].dtype == 'bool']
+            self.cell_gene_table.obs.drop(columns=filter_columns, inplace=True)
+            print("All filters removed from obs DataFrame.")
+        else:
+            # Remove a specific filter
+            if filter_name in self.cell_gene_table.obs.columns:
+                self.cell_gene_table.obs.drop(columns=[filter_name], inplace=True)
+                print(f"Filter '{filter_name}' removed from obs DataFrame.")
+            else:
+                print(f"Error: Filter '{filter_name}' not found in obs DataFrame.")
+
+
+
     # Make a function to return the cell_gene_table as a DataFrame
-    def get_cell_gene_table_df(self):
-        """Returns the cell_gene_table as a DataFrame."""
+    def get_cell_gene_table_df(self, **kwargs):
+        use_filter = kwargs.get('use_filter', True)  # Default to True if use_filter is not provided
+        """Returns the cell_gene_table as a DataFrame, optionally applying a filter.
+
+        Parameters:
+        - use_filter: If True (default), applies the 'default_filter'. If False, no filter is applied.
+                    If a string, it uses that as the column name for filtering.
+        """
         if self.cell_gene_table is None:
             print("Error: Cell Count DataFrame is not loaded.")
             return
-        return self.cell_gene_table.to_df()
+
+        df = self.cell_gene_table.to_df()
+
+        # Determine the filter to apply
+        filter_column = "default_filter"
+        if isinstance(use_filter, str):
+            filter_column = use_filter
+
+        if use_filter:
+            if filter_column in self.cell_gene_table.obs:
+                df = df[self.cell_gene_table.obs[filter_column]]
+                num_filtered = df.shape[0]
+                num_total = self.cell_gene_table.n_obs
+                print(f"*** NOTE: {filter_column} being applied, using {num_filtered} of {num_total} total objects ***")
+            else:
+                if not filter_column in self.cell_gene_table.obs:
+                    print("No filtering available or applied.")
+                else:
+                    print(f"Filter column '{filter_column}' not applied. Returning unfiltered data.")
+        return df
+
         
-    def plot_gene_scatter(self, gene1, gene2):
+    def plot_gene_scatter(self, gene1, gene2, **kwargs):
         """Plots a scatter plot comparing occurrences of two genes across cells.
 
         Parameters:
@@ -227,7 +300,7 @@ class SGobject:
             return
         
         # Lot easier to work with a dataframe than an AnnData object
-        cell_gene_table_df = self.cell_gene_table.to_df()
+        cell_gene_table_df = self.get_cell_gene_table_df(**kwargs)
         
         # Check if both genes exist in the columns of cell_gene_table
         if gene1 not in cell_gene_table_df.columns or gene2 not in cell_gene_table_df.columns:
@@ -247,7 +320,7 @@ class SGobject:
         plt.grid(True)
         plt.show()
 
-    def show_gene_stats_plots(self, gene_name = None):
+    def show_gene_stats_plots(self, gene_name = None, **kwargs):
         """Shows plots of gene statistics for the assigned points.
 
         Parameters:
@@ -262,7 +335,7 @@ class SGobject:
             return
         
         # Lot easier to work with a dataframe than an AnnData object
-        cell_gene_table_df = self.cell_gene_table.to_df()
+        cell_gene_table_df = self.get_cell_gene_table_df(**kwargs)
 
         if gene_name in cell_gene_table_df.columns:
             # Plot histogram of expression levels for the specified gene
@@ -320,7 +393,7 @@ class SGobject:
             return
         
         # Lot easier to work with a dataframe than an AnnData object
-        cell_gene_table_df = self.cell_gene_table.to_df()
+        cell_gene_table_df = self.get_cell_gene_table_df(use_filter=False)
 
         # Basic Statistics
         num_objects = len(self.gdf)
@@ -455,8 +528,8 @@ class SGobject:
 
         plt.show()
 
-    def l_metric(self, gene1, gene2, plot_hexbin=False, plot_gene_counts=False, plot_cumulative_sum=False):
-        cell_count_df = self.get_cell_gene_table_df()
+    def l_metric(self, gene1, gene2, plot_hexbin=False, plot_gene_counts=False, plot_cumulative_sum=False, **kwargs):
+        cell_count_df = self.get_cell_gene_table_df(**kwargs)
         gene1_counts = cell_count_df.get(gene1)
         gene2_counts = cell_count_df.get(gene2)
 
