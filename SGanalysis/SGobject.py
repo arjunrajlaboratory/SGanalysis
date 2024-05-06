@@ -205,7 +205,11 @@ class SGobject:
         
         # Reset the index so the index_col becomes a regular column
         # pivot_table.reset_index(inplace=True)
-        self.cell_gene_table = sc.AnnData(pivot_table)
+
+        pivot_table_full = pd.merge(self.gdf[index_col], pivot_table, on=index_col, how='outer').fillna(0)
+
+        # Create the AnnData object
+        self.cell_gene_table = sc.AnnData(pivot_table_full)
 
     def add_filter(self, filter_mask, filter_column="default_filter"):
         """Adds a filter as a column to the obs DataFrame of the AnnData object.
