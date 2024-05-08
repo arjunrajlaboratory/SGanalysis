@@ -8,6 +8,7 @@ from rasterio.features import shapes
 from shapely.geometry import Point, shape, Polygon, box
 import matplotlib.pyplot as plt
 import json
+import random
 
 class SGobject:
     def __init__(self):
@@ -593,14 +594,16 @@ class SGobject:
         total_area_normalized = total_area / (df_sorted['cumsum_' + gene1].iloc[-1] * df_sorted['cumsum_' + gene2].iloc[-1])
         return area_difference_normalized, total_area_normalized
 
-    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0):
+
+
+    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0, randomize_spot_colors=True):
         if not object_name:
             object_name = self.gdf.geometry.name
 
         if gene_names is not None:
             if isinstance(gene_names, str):
-                gene_names = [gene_names] # Convert single gene name to list
-        
+                gene_names = [gene_names]  # Convert single gene name to list
+
         annotations = []
         # Export polygons
         for index, row in self.gdf.iterrows():
@@ -615,6 +618,13 @@ class SGobject:
             }
             annotations.append(polygon)
 
+        # Prepare color mapping for points if randomize_spot_colors is True
+        color_mapping = {}
+        if randomize_spot_colors and gene_names:
+            all_gene_names = set(self.points_gdf[self.points_gdf['name'].isin(gene_names)]['name'])
+            for name in all_gene_names:
+                color_mapping[name] = "#{:06X}".format(random.randint(0, 0xFFFFFF))
+
         # Export points
         if gene_names:
             filtered_points_gdf = self.points_gdf[self.points_gdf['name'].isin(gene_names)]
@@ -623,7 +633,6 @@ class SGobject:
 
         if len(filtered_points_gdf) > 500000:
             raise ValueError("There are more than 500,000 points. Please specify gene_names to filter.")
-        
 
         point_id_start = len(self.gdf) + 1
         for index, row in filtered_points_gdf.iterrows():
@@ -636,6 +645,10 @@ class SGobject:
                 "id": str(point_id_start + index),
                 "datasetId": datasetId
             }
+            # Add color only if randomization is enabled
+            if randomize_spot_colors:
+                point['color'] = color_mapping.get(row['name'], "#000000")  # Default color if not found
+
             annotations.append(point)
 
         # Assuming connections and properties are not part of this task
@@ -650,3 +663,4 @@ class SGobject:
             json.dump(output_data, outfile, indent=2)
 
         print(f"Exported to JSON: {output_file_path}")
+
