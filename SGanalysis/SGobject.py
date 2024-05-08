@@ -9,6 +9,10 @@ from shapely.geometry import Point, shape, Polygon, box
 import matplotlib.pyplot as plt
 import json
 import random
+import subprocess
+import os
+from shapely.affinity import scale
+
 
 class SGobject:
     def __init__(self):
@@ -211,6 +215,145 @@ class SGobject:
 
         # Create the AnnData object
         self.cell_gene_table = sc.AnnData(pivot_table_full)
+    
+    def run_proseg(self, output_path='output.csv', regenerate_proseg_polygons=False):
+        """Export processed data merging points_gdf and assigned_points_gdf, then save to CSV."""
+        if self.points_gdf is None or self.assigned_points_gdf is None:
+            raise ValueError("Points not loaded/assigned. Please load data and assign points before exporting.")
+
+        # Merge GeoDataFrames
+        merged_gdf = self.points_gdf.merge(self.assigned_points_gdf[['object_id']], left_index=True, right_index=True, how='left')
+
+        # Replace NaN in 'object_id' with '0'
+        merged_gdf['object_id'].fillna('0', inplace=True)
+
+        # Prepare DataFrame with specified columns and transformations
+        new_df = pd.DataFrame({
+            'transcript_id': merged_gdf.index,
+            'gene_column': merged_gdf['name'],
+            'x_column': merged_gdf['x'],
+            'y_column': merged_gdf['y'],
+            'cell_id': merged_gdf['object_id']
+        })
+
+        # Convert 'cell_id' to integer for comparison
+        new_df['cell_id'] = new_df['cell_id'].astype(int)
+
+        # Add 'compartment_column' based on 'cell_id'
+        new_df['compartment_column'] = (new_df['cell_id'] > 0).astype(int)
+
+        # Add a new column 'z' with the value 1 for all rows
+        new_df['z'] = 1
+
+        # Save to CSV
+        new_df.to_csv(output_path, index=False)
+
+        print(f"Data exported to {output_path}")
+
+        geojson_path = 'cell-polygons.geojson'
+
+        # Check if the output file exists and conditionally run proseg and gunzip
+        if not os.path.exists(geojson_path) or regenerate_proseg_polygons:
+            print("Running Proseg...")
+            # Build the command to run proseg
+            proseg_command = [
+                'proseg',
+                '--gene-column', 'gene_column',
+                '--transcript-id-column', 'transcript_id',
+                '--x-column', 'x_column',
+                '--y-column', 'y_column',
+                '--z-column', 'z',
+                '--compartment-column', 'compartment_column',
+                '--compartment-nuclear', '1',
+                '--cell-id-column', 'cell_id',
+                '--cell-id-unassigned', '0',
+                '--ignore-z-coord',
+                '--no-diffusion',
+                '--diffusion-probability', '0.01',
+                '--coordinate-scale', '0.107',
+                '--enforce-connectivity',
+                output_path
+            ]
+
+            # Execute the proseg command
+            try:
+                result = subprocess.run(proseg_command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                print("Proseg Output:", result.stdout)
+                print("Proseg Errors (if any):", result.stderr)
+            except subprocess.CalledProcessError as e:
+                print("Error during Proseg execution:", e)
+                print(e.stdout)
+                print(e.stderr)
+                return
+
+            # Command to decompress the geojson file
+            if not os.path.exists(geojson_path):
+                gunzip_command = ['gunzip', 'cell-polygons.geojson.gz']
+
+                # Execute the gunzip command
+                try:
+                    subprocess.run(gunzip_command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    print("Decompression complete: cell-polygons.geojson.gz")
+                except subprocess.CalledProcessError as e:
+                    print("Error during decompression:", e)
+                    print(e.stdout)
+                    print(e.stderr)
+        else:
+            print("Proseg output already exists. Skipping Proseg and gunzip.")
+        
+        print("Loading cell polygons from proseg output and processing...")
+        self.gdf = self._load_and_process_geometries(geojson_path)
+        print("New GDF loaded and processed. Use create_cell_gene_table() to generate the cell_gene_table.")
+
+    def _load_and_process_geometries(self, geojson_path):
+        # Load GeoJSON file produced by proseg
+        geo_df = gpd.read_file(geojson_path)
+
+        # Scale geometries
+        scale_factor = 1 / 0.107
+        geo_df['geometry'] = geo_df['geometry'].apply(lambda geom: scale(geom, xfact=scale_factor, yfact=scale_factor, origin=(0, 0)))
+
+        # Process geometries to simplify and select largest Polygon if MultiPolygon
+        processed_geometries = []
+        count_multipolygon = 0
+        count_polygon = 0
+
+        for geom in geo_df.geometry:
+            if geom.geom_type == 'MultiPolygon':
+                if len(geom.geoms) > 1: # if there are multiple polygons in the multipolygon
+                    count_multipolygon += 1
+                    largest_polygon = max(geom.geoms, key=lambda x: x.area)
+                else:
+                    count_polygon += 1
+                    largest_polygon = geom.geoms[0]
+                simplified_polygon = largest_polygon.simplify(1.43, preserve_topology=True)
+                processed_geometries.append(simplified_polygon)
+            else:
+                count_polygon += 1
+                simplified_polygon = geom.simplify(1.43, preserve_topology=True)
+                processed_geometries.append(simplified_polygon)
+
+        geo_df['geometry'] = processed_geometries  # Replace original with simplified
+        geo_df.set_geometry('geometry', inplace=True)  # Ensure 'geometry' is still the active geometry column
+
+        print(f"Total MultiPolygons processed into largest Polygons: {count_multipolygon}")
+        print(f"Total Polygons simplified: {count_polygon}")
+
+        if 'cell' in geo_df.columns:
+            print("cell column exists")
+            geo_df['object_id'] = geo_df['cell'].astype(str)
+            geo_df.drop(columns=['cell'], inplace=True)
+
+        # Replace the original geometry column with the processed geometries
+        geo_df['cell'] = processed_geometries  # Assign processed geometries to new 'cell' column
+
+
+        # Set 'cell' as the active geometry column
+        geo_df.set_geometry('cell', inplace=True)
+        geo_df.drop(columns=['geometry'], inplace=True)
+
+        return geo_df
+
 
     def add_filter(self, filter_mask, filter_column="default_filter"):
         """Adds a filter as a column to the obs DataFrame of the AnnData object.
