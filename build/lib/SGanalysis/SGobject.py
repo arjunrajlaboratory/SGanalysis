@@ -635,22 +635,18 @@ class SGobject:
         dy = (maxy - miny) * 0.5
         expanded_bbox = box(minx - dx, miny - dy, maxx + dx, maxy + dy)
 
-        # other_polygons = self.gdf[self.gdf.geometry.intersects(expanded_bbox) & (self.gdf[id_field] != identifier)]
-        # points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf.geometry.within(expanded_bbox)]
-
-        # if gene_names is not None:
-        #     if isinstance(gene_names, str):
-        #         gene_names = [gene_names]
-        #     points_within_bbox = points_within_bbox[points_within_bbox['name'].isin(gene_names)]
-
         other_polygons = self.gdf[self.gdf.geometry.intersects(expanded_bbox) & (self.gdf[id_field] != identifier)]
+        
         
         if gene_names is not None:
             if isinstance(gene_names, str):
                 gene_names = [gene_names]
+            # first pick the subset of points corresponding to the gene names
             points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf['name'].isin(gene_names)]
+            # then filter to those within the expanded bbox
             points_within_bbox = points_within_bbox[points_within_bbox.geometry.within(expanded_bbox)]
         else:
+            # if no gene names are passed, get all the ones in the expanded bbox
             points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf.geometry.within(expanded_bbox)]
 
         fig, ax = plt.subplots()
