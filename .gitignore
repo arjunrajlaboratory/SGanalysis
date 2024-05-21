@@ -6,3 +6,4 @@ SGanalysis.egg-info/SOURCES.txt
 SGanalysis.egg-info/top_level.txt
 *.pyc
 .vscode/settings.json
+build/*
