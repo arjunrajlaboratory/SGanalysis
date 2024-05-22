@@ -617,7 +617,7 @@ class SGobject:
         ax.set_ylabel("Y")
         plt.show()
 
-    def plot_polygon_and_points(self, identifier, id_field='object_id', gene_names=None):
+    def plot_polygon_and_points(self, identifier, id_field='object_id', gene_names=None,annotate=True):
         if self.gdf is None or self.assigned_points_gdf is None:
             print("Error: Ensure both gdf and assigned_points_gdf are loaded.")
             return
@@ -636,12 +636,18 @@ class SGobject:
         expanded_bbox = box(minx - dx, miny - dy, maxx + dx, maxy + dy)
 
         other_polygons = self.gdf[self.gdf.geometry.intersects(expanded_bbox) & (self.gdf[id_field] != identifier)]
-        points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf.geometry.within(expanded_bbox)]
-
+        
+        
         if gene_names is not None:
             if isinstance(gene_names, str):
                 gene_names = [gene_names]
-            points_within_bbox = points_within_bbox[points_within_bbox['name'].isin(gene_names)]
+            # first pick the subset of points corresponding to the gene names
+            points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf['name'].isin(gene_names)]
+            # then filter to those within the expanded bbox
+            points_within_bbox = points_within_bbox[points_within_bbox.geometry.within(expanded_bbox)]
+        else:
+            # if no gene names are passed, get all the ones in the expanded bbox
+            points_within_bbox = self.assigned_points_gdf[self.assigned_points_gdf.geometry.within(expanded_bbox)]
 
         fig, ax = plt.subplots()
         polygon_gdf.boundary.plot(ax=ax, color='red', linewidth=2)
@@ -664,9 +670,10 @@ class SGobject:
             if not exterior_points.empty:
                 ax.scatter(exterior_points.geometry.x, exterior_points.geometry.y, marker='x', s=50, color=color_map[name])
             
-            # Labeling remains the same for all points
-            for x, y in zip(group.geometry.x, group.geometry.y):
-                ax.text(x, y, name, fontsize=8, ha='right')
+            if annotate:
+                # Labeling remains the same for all points
+                for x, y in zip(group.geometry.x, group.geometry.y):
+                    ax.text(x, y, name, fontsize=8, ha='right')
 
         ax.set_xlim([minx - dx, maxx + dx])
         ax.set_ylim([miny - dy, maxy + dy])
