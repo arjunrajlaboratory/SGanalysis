@@ -207,14 +207,10 @@ class SGobject:
                                     columns='name',  # Columns are 'name'
                                     aggfunc='count',  # Count occurrences
                                     fill_value=0)  # Fill missing values with 0
-        
-        # Reset the index so the index_col becomes a regular column
-        # pivot_table.reset_index(inplace=True)
 
-        pivot_table_full = pd.merge(self.gdf[index_col], pivot_table, on=index_col, how='outer').fillna(0)
 
         # Create the AnnData object
-        self.cell_gene_table = sc.AnnData(pivot_table_full)
+        self.cell_gene_table = sc.AnnData(pivot_table)
     
     def run_proseg(self, output_path='output.csv', regenerate_proseg_polygons=False):
         """Export processed data merging points_gdf and assigned_points_gdf, then save to CSV."""
