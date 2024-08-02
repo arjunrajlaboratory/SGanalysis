@@ -7,11 +7,13 @@ import tifffile as tiff
 from rasterio.features import shapes
 from shapely.geometry import Point, shape, Polygon, box
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import json
 import random
 import subprocess
 import os
 from shapely.affinity import scale
+import warnings
 
 
 class SGobject:
@@ -742,7 +744,10 @@ class SGobject:
 
 
 
-    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0, randomize_spot_colors=True):
+    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", 
+                          time=0, xy=0, z=0, object_channel=3, point_channel=0, 
+                          randomize_spot_colors=True, include_connections=False, 
+                          obs_variable=None):
         if not object_name:
             object_name = self.gdf.geometry.name
 
@@ -751,7 +756,46 @@ class SGobject:
                 gene_names = [gene_names]  # Convert single gene name to list
 
         annotations = []
+        connections = []
+        annotation_properties = []
+        annotation_property_values = {}
+        
+        # Check if obs_variable exists in the obs DataFrame
+        if obs_variable and obs_variable not in self.cell_gene_table.obs.columns:
+            raise ValueError(f"The specified obs_variable '{obs_variable}' does not exist in the obs DataFrame.")
+
+        # Determine if the obs_variable is categorical or continuous
+        is_categorical = False
+        color_mapping = {}
+        if obs_variable:
+            if self.cell_gene_table.obs[obs_variable].dtype.name in ['object', 'category']:
+                is_categorical = True
+                unique_categories = self.cell_gene_table.obs[obs_variable].unique()
+                color_mapping = {cat: "#{:06x}".format(random.randint(0, 0xFFFFFF)) for cat in unique_categories}
+            else:
+                # For continuous variables, we'll use a colormap
+                min_val = self.cell_gene_table.obs[obs_variable].min()
+                max_val = self.cell_gene_table.obs[obs_variable].max()
+                norm = mcolors.Normalize(vmin=min_val, vmax=max_val)
+                cmap = plt.get_cmap('viridis')
+
+        # Add annotation property for the obs_variable
+        if obs_variable:
+            property_id = f"property_{obs_variable}"
+            annotation_properties.append({
+                "id": property_id,
+                "name": f"{obs_variable} {'Category' if is_categorical else 'Value'}",
+                "image": "No image",
+                "tags": {
+                    "exclusive": False,
+                    "tags": [object_name]
+                },
+                "shape": "polygon",
+                "workerInterface": {}
+            })
+
         # Export polygons
+        skipped_objects = 0
         for index, row in self.gdf.iterrows():
             polygon = {
                 "tags": [object_name],
@@ -762,14 +806,25 @@ class SGobject:
                 "id": str(row['object_id']),
                 "datasetId": datasetId
             }
+            
+            if obs_variable:
+                try:
+                    obs_value = self.cell_gene_table.obs.loc[row['object_id'], obs_variable]
+                    if is_categorical:
+                        polygon['color'] = color_mapping[obs_value]
+                        polygon['tags'].append(str(obs_value))
+                    else:
+                        polygon['color'] = mcolors.to_hex(cmap(norm(obs_value)))
+                    
+                    # Add property value
+                    annotation_property_values[row['object_id']] = {
+                        property_id: str(obs_value)
+                    }
+                except KeyError:
+                    skipped_objects += 1
+                    warnings.warn(f"Object ID {row['object_id']} not found in cell_gene_table.obs. Skipping obs_variable for this object.")
+            
             annotations.append(polygon)
-
-        # Prepare color mapping for points if randomize_spot_colors is True
-        color_mapping = {}
-        if randomize_spot_colors and gene_names:
-            all_gene_names = set(self.points_gdf[self.points_gdf['name'].isin(gene_names)]['name'])
-            for name in all_gene_names:
-                color_mapping[name] = "#{:06X}".format(random.randint(0, 0xFFFFFF))
 
         # Export points
         if gene_names:
@@ -781,14 +836,18 @@ class SGobject:
             raise ValueError("There are more than 500,000 points. Please specify gene_names to filter.")
 
         point_id_start = len(self.gdf) + 1
+        point_id_mapping = {}  # To store mapping between point index and its new ID
+
         for index, row in filtered_points_gdf.iterrows():
+            point_id = str(point_id_start + index)
+            point_id_mapping[index] = point_id
             point = {
                 "tags": [row['name']],
                 "shape": "point",
                 "channel": point_channel,
                 "location": {"Time": time, "XY": xy, "Z": z},
                 "coordinates": [{"x": row['geometry'].x, "y": row['geometry'].y, "z": 0}],
-                "id": str(point_id_start + index),
+                "id": point_id,
                 "datasetId": datasetId
             }
             # Add color only if randomization is enabled
@@ -797,16 +856,37 @@ class SGobject:
 
             annotations.append(point)
 
-        # Assuming connections and properties are not part of this task
+        # Add connections if include_connections is True
+        if include_connections:
+            connection_id_start = len(annotations) + 1
+            for index, row in self.assigned_points_gdf.iterrows():
+                if pd.notnull(row['object_id']):  # Check if the point is assigned to a nucleus
+                    connection = {
+                        "label": "(Connection) Point to Nucleus",
+                        "tags": ["point_to_nucleus_connection"],
+                        "id": str(connection_id_start + index),
+                        "parentId": str(row['object_id']),  # The nucleus ID
+                        "childId": point_id_mapping.get(index, None),  # The point ID
+                        "datasetId": datasetId
+                    }
+                    if connection["childId"] is not None:  # Only add connection if the point was included
+                        connections.append(connection)
+
+        # Prepare the output data
         output_data = {
             "annotations": annotations,
-            "annotationConnections": [],
-            "annotationProperties": [],
-            "annotationPropertyValues": {}
+            "annotationConnections": connections,
+            "annotationProperties": annotation_properties,
+            "annotationPropertyValues": annotation_property_values
         }
 
         with open(output_file_path, 'w') as outfile:
             json.dump(output_data, outfile, indent=2)
 
         print(f"Exported to JSON: {output_file_path}")
-
+        print(f"Total annotations: {len(annotations)}")
+        print(f"Total connections: {len(connections)}")
+        if obs_variable:
+            print(f"Added coloring and properties based on '{obs_variable}'")
+            if skipped_objects > 0:
+                print(f"Warning: {skipped_objects} objects were skipped due to missing data in cell_gene_table.obs")
