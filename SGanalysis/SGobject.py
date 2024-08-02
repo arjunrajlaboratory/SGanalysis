@@ -742,7 +742,7 @@ class SGobject:
 
 
 
-    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0, randomize_spot_colors=True):
+    def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", time=0, xy=0, z=0, object_channel=3, point_channel=0, randomize_spot_colors=True, include_connections=False):
         if not object_name:
             object_name = self.gdf.geometry.name
 
@@ -751,6 +751,8 @@ class SGobject:
                 gene_names = [gene_names]  # Convert single gene name to list
 
         annotations = []
+        connections = []
+        
         # Export polygons
         for index, row in self.gdf.iterrows():
             polygon = {
@@ -781,14 +783,18 @@ class SGobject:
             raise ValueError("There are more than 500,000 points. Please specify gene_names to filter.")
 
         point_id_start = len(self.gdf) + 1
+        point_id_mapping = {}  # To store mapping between point index and its new ID
+
         for index, row in filtered_points_gdf.iterrows():
+            point_id = str(point_id_start + index)
+            point_id_mapping[index] = point_id
             point = {
                 "tags": [row['name']],
                 "shape": "point",
                 "channel": point_channel,
                 "location": {"Time": time, "XY": xy, "Z": z},
                 "coordinates": [{"x": row['geometry'].x, "y": row['geometry'].y, "z": 0}],
-                "id": str(point_id_start + index),
+                "id": point_id,
                 "datasetId": datasetId
             }
             # Add color only if randomization is enabled
@@ -797,10 +803,26 @@ class SGobject:
 
             annotations.append(point)
 
-        # Assuming connections and properties are not part of this task
+        # Add connections if include_connections is True
+        if include_connections:
+            connection_id_start = len(annotations) + 1
+            for index, row in self.assigned_points_gdf.iterrows():
+                if pd.notnull(row['object_id']):  # Check if the point is assigned to a nucleus
+                    connection = {
+                        "label": "(Connection) Point to Nucleus",
+                        "tags": ["point_to_nucleus_connection"],
+                        "id": str(connection_id_start + index),
+                        "parentId": str(row['object_id']),  # The nucleus ID
+                        "childId": point_id_mapping.get(index, None),  # The point ID
+                        "datasetId": datasetId
+                    }
+                    if connection["childId"] is not None:  # Only add connection if the point was included
+                        connections.append(connection)
+
+        # Prepare the output data
         output_data = {
             "annotations": annotations,
-            "annotationConnections": [],
+            "annotationConnections": connections,
             "annotationProperties": [],
             "annotationPropertyValues": {}
         }
@@ -809,4 +831,5 @@ class SGobject:
             json.dump(output_data, outfile, indent=2)
 
         print(f"Exported to JSON: {output_file_path}")
-
+        print(f"Total annotations: {len(annotations)}")
+        print(f"Total connections: {len(connections)}")
