@@ -747,7 +747,7 @@ class SGobject:
     def export_to_nimbus_json(self, output_file_path, object_name=None, gene_names=None, datasetId="unknown", 
                           time=0, xy=0, z=0, object_channel=3, point_channel=0, 
                           randomize_spot_colors=True, include_connections=False, 
-                          obs_variable=None):
+                          obs_variable=None, export_gene_counts=None):
         if not object_name:
             object_name = self.gdf.geometry.name
 
@@ -785,7 +785,7 @@ class SGobject:
             annotation_properties.append({
                 "id": property_id,
                 "name": f"{obs_variable} {'Category' if is_categorical else 'Value'}",
-                "image": "No image",
+                "image": "none",
                 "tags": {
                     "exclusive": False,
                     "tags": [object_name]
@@ -794,8 +794,36 @@ class SGobject:
                 "workerInterface": {}
             })
 
+
+        # Determine which genes to export counts for
+        genes_to_export = []
+        if export_gene_counts is True:
+            if isinstance(export_gene_counts, list):
+                genes_to_export = export_gene_counts
+            elif export_gene_counts == "all":
+                genes_to_export = list(self.cell_gene_table.var_names)
+            else:
+                genes_to_export = gene_names
+        print(f"Exporting gene counts: {genes_to_export}")
+
+        # Add "Counts" property
+        if genes_to_export:
+            counts_property_id = "property_Counts"
+            annotation_properties.append({
+                "id": counts_property_id,
+                "name": "Counts",
+                "image": "none",
+                "tags": {
+                    "exclusive": False,
+                    "tags": [object_name]
+                },
+                "shape": "polygon",
+                "workerInterface": {}
+            })
+            
         # Export polygons
         skipped_objects = 0
+
         for index, row in self.gdf.iterrows():
             polygon = {
                 "tags": [object_name],
@@ -825,6 +853,27 @@ class SGobject:
                     warnings.warn(f"Object ID {row['object_id']} not found in cell_gene_table.obs. Skipping obs_variable for this object.")
             
             annotations.append(polygon)
+
+        # Add gene counts
+        if genes_to_export:
+            cell_gene_df = self.get_cell_gene_table_df(use_filter=False)
+            # if counts_property_id not in annotation_property_values:
+            #     annotation_property_values[counts_property_id] = {}
+            
+            for index, row in self.gdf.iterrows():
+                object_id = str(row['object_id'])
+                try:
+                    if object_id in cell_gene_df.index:
+                        gene_counts = cell_gene_df.loc[object_id, genes_to_export]
+                        counts_dict = {gene: int(count) for gene, count in gene_counts.items()}
+                        annotation_property_values[object_id] = {
+                            counts_property_id: counts_dict
+                        }
+                    else:
+                        raise KeyError
+                except KeyError:
+                    skipped_objects += 1
+                    warnings.warn(f"Object ID {object_id} not found in cell_gene_table. Skipping gene counts for this object.")
 
         # Export points
         if gene_names:
@@ -888,5 +937,7 @@ class SGobject:
         print(f"Total connections: {len(connections)}")
         if obs_variable:
             print(f"Added coloring and properties based on '{obs_variable}'")
-            if skipped_objects > 0:
-                print(f"Warning: {skipped_objects} objects were skipped due to missing data in cell_gene_table.obs")
+        if genes_to_export:
+            print(f"Exported counts for {len(genes_to_export)} genes")
+        if skipped_objects > 0:
+            print(f"Warning: {skipped_objects} objects were skipped due to missing data")
