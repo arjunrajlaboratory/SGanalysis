@@ -800,11 +800,11 @@ class SGobject:
         if export_gene_counts is True:
             if isinstance(export_gene_counts, list):
                 genes_to_export = export_gene_counts
-            elif export_gene_counts is "all":
-                genes_to_export = genes_to_export = list(self.cell_gene_table.var_names)
+            elif export_gene_counts == "all":
+                genes_to_export = list(self.cell_gene_table.var_names)
             else:
                 genes_to_export = gene_names
-        print(f"Exporting_gene_counts: {genes_to_export}")
+        print(f"Exporting gene counts: {genes_to_export}")
 
         # Add "Counts" property
         if genes_to_export:
@@ -857,8 +857,8 @@ class SGobject:
         # Add gene counts
         if genes_to_export:
             cell_gene_df = self.get_cell_gene_table_df(use_filter=False)
-            if counts_property_id not in annotation_property_values:
-                annotation_property_values[counts_property_id] = {}
+            # if counts_property_id not in annotation_property_values:
+            #     annotation_property_values[counts_property_id] = {}
             
             for index, row in self.gdf.iterrows():
                 object_id = str(row['object_id'])
@@ -866,7 +866,9 @@ class SGobject:
                     if object_id in cell_gene_df.index:
                         gene_counts = cell_gene_df.loc[object_id, genes_to_export]
                         counts_dict = {gene: int(count) for gene, count in gene_counts.items()}
-                        annotation_property_values[counts_property_id][object_id] = counts_dict
+                        annotation_property_values[object_id] = {
+                            counts_property_id: counts_dict
+                        }
                     else:
                         raise KeyError
                 except KeyError:
