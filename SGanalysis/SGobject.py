@@ -234,8 +234,18 @@ class SGobject:
                                      aggfunc='count',  # Count occurrences
                                      fill_value=0)  # Fill missing values with 0
 
+        # Get all object IDs from gdf to ensure all cells are included, in original order
+        all_object_ids = self.gdf[index_col].tolist()
+
+        # Use reindex to include all objects from gdf while preserving order
+        # This will add rows for missing objects with NaN values
+        complete_pivot_table = pivot_table.reindex(all_object_ids)
+
+        # Fill NaN values with 0
+        complete_pivot_table.fillna(0, inplace=True)
+
         # Create the AnnData object
-        self.cell_gene_table = sc.AnnData(pivot_table)
+        self.cell_gene_table = sc.AnnData(complete_pivot_table)
 
     def run_proseg(self, output_path='output.csv', regenerate_proseg_polygons=False):
         """Export processed data merging points_gdf and assigned_points_gdf, then save to CSV."""
